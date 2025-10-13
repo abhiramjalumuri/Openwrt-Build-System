@@ -1,0 +1,6 @@
+config PACKAGE_EASYCWMP
+    bool "easycwmp"
+    default n
+    help
+      EasyCWMP - TR-069 CPE client
+
