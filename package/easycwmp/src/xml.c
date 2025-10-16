@@ -223,7 +223,7 @@ int xml_mxml_get_attrname_array(mxml_node_t *node,
 		return (-1);
 
 	for (i = node->value.element.num_attrs, attr = node->value.element.attrs;
-		i > 0;
+	i > 0;
 		i --, attr ++)
 	{
 		if (!strcmp(attr->value, value) && *(attr->name + 5) == ':')
@@ -299,8 +299,27 @@ static int xml_recreate_namespace(mxml_node_t *tree)
 		}
 	} while (b = mxmlWalkNext(b, tree, MXML_DESCEND));
 
-	if ((ns.soap_env[0] != NULL ) && (ns.cwmp != NULL))
+	// Check for prefixed namespaces (original logic)
+	if ((ns.soap_env[0] != NULL ) && (ns.cwmp != NULL)) {
 		return 0;
+	}
+	
+	// Handle simplified namespaces (no prefixes)
+	// Check if we have valid SOAP envelope with default namespaces
+	mxml_node_t *envelope = mxmlFindElement(tree, tree, "Envelope", NULL, NULL, MXML_DESCEND);
+	if (envelope) {
+		const char *soap_ns = mxmlElementGetAttrValue(envelope, "xmlns");
+		if (soap_ns && strstr(soap_ns, "soap/envelope")) {
+			// Found valid SOAP envelope with default namespace
+			mxml_node_t *response = mxmlFindElement(tree, tree, "InformResponse", NULL, NULL, MXML_DESCEND);
+			if (response) {
+				const char *cwmp_ns = mxmlElementGetAttrValue(response, "xmlns");
+				if (cwmp_ns && strstr(cwmp_ns, "cwmp")) {
+					return 0; // Valid simplified SOAP response
+				}
+			}
+		}
+	}
 
 	return -1;
 }
@@ -676,7 +695,19 @@ int xml_parse_inform_response_message(char *msg_in)
 
 	tree = mxmlLoadString(NULL, msg_in, MXML_OPAQUE_CALLBACK);
 	if (!tree) goto error;
-	if(xml_recreate_namespace(tree)) goto error;
+	
+	// Try to recreate namespace, but handle simplified format gracefully
+	if(xml_recreate_namespace(tree)) {
+		// Check if this is a valid simplified SOAP response
+		mxml_node_t *envelope = mxmlFindElement(tree, tree, "Envelope", NULL, NULL, MXML_DESCEND);
+		mxml_node_t *response = mxmlFindElement(tree, tree, "InformResponse", NULL, NULL, MXML_DESCEND);
+		
+		if (!envelope || !response) {
+			log_message(NAME, L_DEBUG, "Invalid SOAP response structure\n");
+			goto error;
+		}
+		log_message(NAME, L_DEBUG, "Processing simplified namespace SOAP response\n");
+	}
 
 	b = xml_mxml_find_node_by_env_type(tree, "Fault");
 	if (b) {
